@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Snake but 8bit (Invincible)</title>
+<style>
+  :root {
+    --bg: #0f1223;
+    --panel: #181b33;
+    --text: #eef1ff;
+    --snake: #00ff66;
+    --snakeHead: #66ff99;
+    --grid: #2a2f55;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    height: 100%;
+    margin: 0;
+    overflow: hidden;
+    background: radial-gradient(1200px 800px at 50% 10%, #1b2044 0%, var(--bg) 55%);
+    color: var(--text);
+    font-family: system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,'Helvetica Neue',Arial,'Noto Sans',sans-serif;
+    display: grid;
+    place-items: center;
+  }
+  .frame {
+    width: min(92vmin, 720px);
+    user-select: none;
+  }
+  .hud {
+    display:flex;
+    gap:12px;
+    justify-content: space-between;
+    align-items:center;
+    margin: 6px 0 10px;
+    flex-wrap: wrap;
+  }
+  .pill {
+    background: var(--panel);
+    padding:8px 12px;
+    border-radius: 10px;
+    font-variant-numeric: tabular-nums;
+  }
+  canvas {
+    width: 100%;
+    height: auto;
+    aspect-ratio: 1 / 1;
+    background:
+      linear-gradient(90deg, var(--grid) 1px, transparent 1px) 0 0 / calc(100%/20) 100%,
+      linear-gradient(0deg, var(--grid) 1px, transparent 1px) 0 0 / 100% calc(100%/20),
+      #0a0d26;
+    border-radius: 14px;
+    box-shadow: inset 0 0 0 1px rgba(255,255,255,.06), 0 12px 30px rgba(0,0,0,.35);
+    display: block;
+  }
+  .hint {
+    text-align:center;
+    opacity:.7;
+    font-size:.9rem;
+    margin-top:6px;
+  }
+  .btns {
+    display:flex;
+    gap:8px;
+    flex-wrap: wrap;
+  }
+  button {
+    background: var(--panel);
+    color: var(--text);
+    border: 1px solid rgba(255,255,255,.12);
+    padding: 8px 12px;
+    border-radius: 10px;
+    cursor: pointer;
+    font-weight: 700;
+    letter-spacing: .2px;
+  }
+  button:hover {
+    border-color: rgba(255,255,255,.22);
+  }
+</style>
+</head>
+<body>
+  <div class="frame" tabindex="0">
+    <div class="hud">
+      <div class="pill">Score: <b id="score">0</b></div>
+      <div class="pill">High: <b id="high">0</b></div>
+      <div class="btns">
+        <button id="startBtn">Start</button>
+        <button id="resetBtn">Restart</button>
+        <button id="fullscreenBtn">Fullscreen</button>
+      </div>
+    </div>
+    <canvas id="game" width="600" height="600"></canvas>
+    <div class="hint">Arrows / WASD to move • Space = pause • R = restart • F = fullscreen • Invincible mode ON</div>
+  </div>
+
+<script>
+(() => {
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+  const scoreEl = document.getElementById('score');
+  const highEl = document.getElementById('high');
+  const startBtn = document.getElementById('startBtn');
+  const resetBtn = document.getElementById('resetBtn');
+  const fullscreenBtn = document.getElementById('fullscreenBtn');
+  const frame = document.querySelector('.frame');
+
+  const GRID = 20;
+  const CELL = canvas.width / GRID;
+  const INITIAL_LEN = 4;
+  const TICK_MS = 90;
+
+  let running = false;
+  let lastTick = 0;
+  let dir = { x: 1, y: 0 };
+  let nextDir = { x: 1, y: 0 };
+  let snake = [];
+  let foods = [];
+  let score = 0;
+  let high = parseInt(localStorage.getItem('snake_highscore_invincible') || '0', 10) || 0;
+  highEl.textContent = high;
+
+  const fruits = [
+    { name: "apple", color: "#ff3b3b", points: 1 },
+    { name: "mango", color: "#ffb733", points: 2 },
+    { name: "banana", color: "#fff85e", points: 2 },
+    { name: "grape", color: "#9c27b0", points: 3 },
+    { name: "watermelon", color: "#33cc66", points: 5 },
+  ];
+
+  const wrap = (v, max) => (v % max + max) % max;
+  const randInt = n => Math.floor(Math.random() * n);
+
+  function fruitCountByScore() {
+    if (score > 50) return 15;
+    if (score > 20) return 5;
+    return 1;
+  }
+
+  function placeFoods() {
+    foods = [];
+    const count = fruitCountByScore();
+    for (let i = 0; i < count; i++) {
+      let fruitType = fruits[randInt(fruits.length)];
+      let pos;
+      do {
+        pos = { x: randInt(GRID), y: randInt(GRID) };
+      } while (
+        snake.some(s => s.x === pos.x && s.y === pos.y) ||
+        foods.some(f => f.x === pos.x && f.y === pos.y)
+      );
+      foods.push({ ...pos, ...fruitType });
+    }
+  }
+
+  function reset() {
+    score = 0;
+    scoreEl.textContent = '0';
+    dir = { x: 1, y: 0 };
+    nextDir = { x: 1, y: 0 };
+    snake = [];
+    const mid = Math.floor(GRID / 2);
+    for (let i = INITIAL_LEN - 1; i >= 0; i--) {
+      snake.push({ x: mid - i, y: mid });
+    }
+    placeFoods();
+    running = true;
+    lastTick = 0;
+    startBtn.textContent = 'Pause';
+  }
+
+  function tick() {
+    if (!running) return;
+    dir = nextDir;
+
+    const head = snake[snake.length - 1];
+    const nx = wrap(head.x + dir.x, GRID);
+    const ny = wrap(head.y + dir.y, GRID);
+    const newHead = { x: nx, y: ny };
+
+    // INVINCIBLE: skip self-collision checks
+    snake.push(newHead);
+
+    // Fruit collision
+    const hitIndex = foods.findIndex(f => f.x === newHead.x && f.y === newHead.y);
+    if (hitIndex !== -1) {
+      const hit = foods[hitIndex];
+      score += hit.points;
+      scoreEl.textContent = score;
+      foods.splice(hitIndex, 1);
+      if (foods.length === 0) {
+        placeFoods();
+      }
+    } else {
+      snake.shift();
+    }
+  }
+
+  function drawCell(x, y, fill) {
+    ctx.fillStyle = fill;
+    ctx.fillRect(x * CELL, y * CELL, CELL - 1, CELL - 1);
+  }
+
+  function render() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // draw foods
+    for (const food of foods) {
+      const cx = (food.x + 0.5) * CELL;
+      const cy = (food.y + 0.5) * CELL;
+      const g = ctx.createRadialGradient(cx, cy, 2, cx, cy, CELL * 0.8);
+      g.addColorStop(0, food.color);
+      g.addColorStop(1, "rgba(255,255,255,0.1)");
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(cx, cy, CELL * 0.45, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // draw snake
+    const bodyColor = getComputedStyle(document.documentElement).getPropertyValue('--snake').trim();
+    const headColor = getComputedStyle(document.documentElement).getPropertyValue('--snakeHead').trim();
+    for (let i = 0; i < snake.length; i++) {
+      const s = snake[i];
+      drawCell(s.x, s.y, i === snake.length - 1 ? headColor : bodyColor);
+    }
+  }
+
+  function loop(ms) {
+    if (ms - lastTick > TICK_MS) {
+      tick();
+      lastTick = ms;
+    }
+    render();
+    requestAnimationFrame(loop);
+  }
+
+  frame.addEventListener('keydown', e => {
+    e.preventDefault();
+    const k = e.key.toLowerCase();
+
+    if (k === ' ' || k === 'spacebar') {
+      running = !running;
+      startBtn.textContent = running ? 'Pause' : 'Start';
+    } else if (k === 'r') {
+      reset();
+    } else if (k === 'f') {
+      toggleFullscreen();
+    }
+
+    const keyMap = {
+      arrowup: { x: 0, y: -1 },
+      w: { x: 0, y: -1 },
+      arrowdown: { x: 0, y: 1 },
+      s: { x: 0, y: 1 },
+      arrowleft: { x: -1, y: 0 },
+      a: { x: -1, y: 0 },
+      arrowright: { x: 1, y: 0 },
+      d: { x: 1, y: 0 },
+    };
+    const newDir = keyMap[k];
+    if (newDir && (newDir.x !== -dir.x || newDir.y !== -dir.y)) nextDir = newDir;
+  });
+
+  window.addEventListener('keydown', e => {
+    if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(e.code)) e.preventDefault();
+  }, { passive: false });
+
+  startBtn.onclick = () => {
+    running = !running;
+    startBtn.textContent = running ? 'Pause' : 'Start';
+  };
+  resetBtn.onclick = () => reset();
+  fullscreenBtn.onclick = () => toggleFullscreen();
+
+  function toggleFullscreen() {
+    if (!document.fullscreenElement)
+      document.documentElement.requestFullscreen();
+    else
+      document.exitFullscreen();
+  }
+
+  reset();
+  frame.focus();
+  requestAnimationFrame(loop);
+})();
+</script>
+
+</body>
+</html>
